@@ -1,0 +1,76 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from tensorflow import keras
+from tensorflow.keras.layers import Dense, LSTM, Conv1D, MaxPooling1D, Flatten
+import requests
+import openai_secret_manager
+
+# Generate a random stochastic process with 100 time steps
+process = np.random.normal(0, 1, 100)
+
+# Split the process into two halves
+input_data = process[:50]
+output_data = process[50:]
+
+# Component 1: deep learning on the stochastic process
+model1 = keras.Sequential([
+    LSTM(units=128, return_sequences=True, input_shape=(50, 1)),
+    LSTM(units=64),
+    Dense(units=1)
+])
+model1.compile(loss='mean_squared_error', optimizer='adam')
+model1.fit(input_data.reshape(-1, 50, 1), output_data.reshape(-1, 1), epochs=100, verbose=0)
+
+# Component 2: Fourier transform and deep learning
+freqs = np.fft.fftfreq(len(process))
+fft = np.fft.fft(process)
+fft_abs = np.abs(fft)
+top_freqs = np.argsort(-fft_abs)[:10]
+top_freqs_data = np.column_stack([np.real(fft[top_freq]) for top_freq in top_freqs])
+input_data2 = np.concatenate([input_data[:, None], top_freqs_data], axis=1)
+output_data2 = output_data[:, None]
+model2 = keras.Sequential([
+    Conv1D(filters=64, kernel_size=3, activation='relu', input_shape=(11, 1)),
+    MaxPooling1D(pool_size=2),
+    LSTM(units=64),
+    Dense(units=1)
+])
+model2.compile(loss='mean_squared_error', optimizer='adam')
+model2.fit(input_data2.reshape(-1, 11, 1), output_data2.reshape(-1, 1), epochs=100, verbose=1)
+
+# Component 3: sentiment analysis with GPT-3
+secret = openai_secret_manager.get_secret("openai")
+api_key = secret["api_key"]
+headers = {
+    'Content-Type': 'application/json',
+    'Authorization': f'Bearer {api_key}',
+}
+query = 'Tesla stock is going up!'
+response = requests.post('https://api.openai.com/v1/engines/davinci-codex/completions',
+                         headers=headers,
+                         json={
+                             'prompt': f'Sentiment analysis: {query}',
+                             'max_tokens': 1,
+                         })
+if response.status_code == 200:
+    prediction = response.json()['choices'][0]['text']
+    print(f'Prediction: {prediction}')
+else:
+    print(f'Error {response.status_code}: {response.text}')
+
+# Visualize the original process and the predicted values
+fig, ax = plt.subplots(figsize=(10, 5))
+
+# Plot the original process
+ax.plot(np.arange(100), process, color='blue', label='Original process')
+
+# Component 1: deep learning on the stochastic process
+model1_pred = model1.predict(input_data.reshape(-1, 50, 1))
+ax.plot(np.arange(50, 100), model1_pred.ravel(), color='orange', label='Model 1 prediction')
+
+# Component 2: Fourier transform and deep learning
+model2_pred = model2.predict(input_data2.reshape(-1, 11, 1))
+ax.plot(np.arange(50, 100), model2_pred.ravel(), color='green', label='Model 2 prediction')
+
+ax.legend()
+plt.show()
